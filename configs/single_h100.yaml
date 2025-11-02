@@ -1,0 +1,43 @@
+# Single H100 Configuration
+# Optimized for 4B-7B MoE models on 1× H100 SXM (80GB)
+# Perfect for: DeepSeek-Coder-6.7B, Phi-3.5-MoE-Instruct, small Mixtral models
+
+model_path: "REPLACE_WITH_YOUR_MODEL"  # e.g., "deepseek-ai/deepseek-coder-6.7b-instruct"
+model_type: "moe"
+num_gpus: 1  # Single H100
+num_experts: 8  # ADJUST BASED ON YOUR MODEL
+max_model_len: 4096
+
+# Quantization (FP8 enabled - H100 native)
+enable_fp8: true
+fp8_router_precision: "fp16"  # Keep router accurate
+
+# Batch processing (optimized for single GPU)
+enable_dual_batch_overlap: true
+max_num_batched_tokens: 16384  # Single H100 can handle large batches
+max_num_seqs: 512  # High concurrency
+
+# Advanced optimizations
+enable_disaggregation: false  # Requires 2+ GPUs
+enable_kv_tiering: true  # Works on single GPU
+kv_recent_window: 2048
+kv_cache_dtype_recent: "fp16"
+kv_cache_dtype_old: "fp8"
+
+enable_expert_placement: true  # Still useful for cache locality
+experts_per_token: 2  # Standard for most MoE
+
+enable_expert_sparsity: false  # Optional - requires fine-tuning
+
+# Single GPU settings
+gpu_memory_utilization: 0.90  # Single GPU - use more memory
+enable_cuda_graphs: true
+enable_profiling: false
+enable_metrics: true
+metrics_port: 9090
+log_level: "INFO"
+
+# Safety
+enable_fallback_path: true
+max_retries: 3
+timeout_seconds: 30.0

@@ -1,0 +1,36 @@
+# Conservative Configuration
+# High accuracy, lower performance
+# Good for: Initial testing, accuracy validation
+
+model_path: "YOUR_MODEL_HERE"  # Set via --model or replace this
+model_type: "moe"
+num_gpus: 1  # Will auto-adjust based on available GPUs
+max_model_len: 4096
+
+# Quantization (conservative)
+enable_fp8: true
+fp8_router_precision: "fp16"  # Keep router in FP16 for accuracy
+
+# Batch processing
+enable_dual_batch_overlap: true
+max_num_batched_tokens: 8192
+max_num_seqs: 256
+
+# Advanced optimizations (disabled for safety)
+enable_disaggregation: false
+enable_kv_tiering: false
+enable_expert_placement: false
+enable_expert_sparsity: false
+
+# Safety settings
+gpu_memory_utilization: 0.85  # More headroom
+enable_cuda_graphs: true
+enable_profiling: false
+enable_metrics: true
+metrics_port: 9090
+log_level: "INFO"
+
+# Fallback and safety
+enable_fallback_path: true
+max_retries: 3
+timeout_seconds: 30.0

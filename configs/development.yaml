@@ -1,0 +1,34 @@
+# Development Configuration
+# For testing without GPU requirements
+# Good for: Local development, CI/CD testing
+
+model_path: "test-model"
+model_type: "moe"
+num_gpus: 1
+max_model_len: 2048
+
+# Basic settings only
+enable_fp8: false
+enable_dual_batch_overlap: true
+max_num_batched_tokens: 2048
+max_num_seqs: 32
+
+# Disable GPU-intensive optimizations
+enable_disaggregation: false
+enable_kv_tiering: false
+enable_expert_placement: false
+enable_expert_sparsity: false
+
+# Development settings
+gpu_memory_utilization: 0.70
+enable_cuda_graphs: false  # Easier debugging
+enable_profiling: true     # Enable profiling
+enable_metrics: true
+metrics_port: 9090
+log_level: "DEBUG"
+
+# Strict safety
+enable_fallback_path: true
+max_retries: 5
+timeout_seconds: 60.0
+accuracy_validation_mode: true

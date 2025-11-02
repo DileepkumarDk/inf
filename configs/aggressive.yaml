@@ -1,0 +1,48 @@
+# Aggressive Configuration
+# Maximum performance
+# Good for: Production deployment after validation
+
+model_path: "YOUR_MODEL_HERE"  # Set via --model or replace this
+model_type: "moe"
+num_gpus: 1  # Will auto-adjust based on available GPUs and model size
+num_experts: 8  # Will auto-detect from model config if available
+max_model_len: 4096
+
+# Quantization (aggressive)
+enable_fp8: true
+fp8_router_precision: "fp8"  # Router in FP8 for max speed
+
+# Batch processing (larger batches)
+enable_dual_batch_overlap: true
+max_num_batched_tokens: 12288
+max_num_seqs: 384
+
+# Advanced optimizations (ALL enabled)
+enable_disaggregation: false  # Only enable if 2+ GPUs available
+# prefill_gpu_ids: [0]  # Uncomment and adjust for multi-GPU
+# decode_gpu_ids: [1]   # Uncomment and adjust for multi-GPU
+
+enable_kv_tiering: true
+kv_recent_window: 2048
+kv_cache_dtype_recent: "fp16"
+kv_cache_dtype_old: "fp8"
+
+enable_expert_placement: true
+experts_per_token: 2
+
+enable_expert_sparsity: true
+expert_sparsity_ratio: "2:4"
+expert_sparsity_targets: ["medium"]
+
+# Performance tuning (push limits)
+gpu_memory_utilization: 0.95
+enable_cuda_graphs: true
+enable_profiling: false
+enable_metrics: true
+metrics_port: 9090
+log_level: "WARNING"  # Less logging overhead
+
+# Minimal fallback
+enable_fallback_path: false
+max_retries: 1
+timeout_seconds: 15.0
