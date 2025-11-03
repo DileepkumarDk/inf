@@ -2,7 +2,14 @@
 Optimization modules package
 """
 
-from .fp8_quantization import FP8QuantizationOptimizer
+# Import optimizations with graceful fallback
+try:
+    from .fp8_quantization import FP8QuantizationOptimizer
+except Exception as e:
+    import logging
+    logging.warning(f"Failed to import FP8QuantizationOptimizer: {e}")
+    FP8QuantizationOptimizer = None
+
 from .dual_batch_overlap import DualBatchOverlapOptimizer
 from .disaggregation import PrefillDecodeDisaggregator
 from .kv_cache import KVCacheTieringOptimizer

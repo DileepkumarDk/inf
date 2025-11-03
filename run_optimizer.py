@@ -43,14 +43,17 @@ from moe_optimizer.core.model_inspector import ModelInspector, auto_configure_fo
 # Note: Optimization classes are available but not directly used in this entry point
 # They are used internally by the OptimizedMoEEngine
 # Imported here for documentation and potential future direct use
-from moe_optimizer.optimizations import (  # noqa: F401
-    FP8QuantizationOptimizer,
-    DualBatchOverlapOptimizer,
-    PrefillDecodeDisaggregator,
-    KVCacheTieringOptimizer,
-    ExpertPlacementOptimizer,
-    StructuredSparsityOptimizer,
-)
+try:
+    from moe_optimizer.optimizations import (  # noqa: F401
+        FP8QuantizationOptimizer,
+        DualBatchOverlapOptimizer,
+        PrefillDecodeDisaggregator,
+        KVCacheTieringOptimizer,
+        ExpertPlacementOptimizer,
+        StructuredSparsityOptimizer,
+    )
+except ImportError as e:
+    logging.warning(f"Some optimizations unavailable: {e}")
 
 
 def setup_logging(verbose: bool = False):

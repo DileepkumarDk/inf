@@ -15,18 +15,26 @@ Accuracy Impact: <0.3% (validated on MMLU)
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional
 from pathlib import Path
+
+# Set environment variable to help Transformer Engine find CUDA
+if not os.getenv("NVTE_CUDA_INCLUDE_DIR"):
+    cuda_home = os.getenv("CUDA_HOME") or "/usr/local/cuda"
+    if os.path.exists(f"{cuda_home}/include"):
+        os.environ["NVTE_CUDA_INCLUDE_DIR"] = f"{cuda_home}/include"
 
 # Try to import Transformer Engine
 try:
     import transformer_engine.pytorch as te
     from transformer_engine.common import recipe
     TE_AVAILABLE = True
-except ImportError:
+except (ImportError, TypeError, AttributeError) as e:
     TE_AVAILABLE = False
     te = None
     recipe = None
+    logging.warning(f"Transformer Engine not available: {e}. FP8 quantization will be disabled.")
 
 # Try to import torch
 try:
