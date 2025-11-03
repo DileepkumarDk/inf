@@ -8,29 +8,42 @@
 #include <cuda_runtime.h>
 #include <vector>
 
-// Forward declarations of CUDA functions
-void flash_dmoe_init_kernel_launcher(
-    void* work_queue,
-    int* queue_head,
-    int* queue_tail,
-    int* shutdown
-);
+// MoEConfig structure (must match kernel definition)
+struct MoEConfig {
+    int num_experts;
+    int expert_dim;
+    int hidden_dim;
+    int top_k;
+    int num_gpus;
+    int expert_per_gpu;
+    bool use_fp8;
+    bool use_sparse_24;
+};
 
-void flash_dmoe_shutdown_kernel_launcher();
-
-torch::Tensor flash_dmoe_forward_launcher(
-    torch::Tensor input_tokens,      // [batch, hidden_dim]
-    torch::Tensor gate_weights,      // [hidden_dim, num_experts]
-    torch::Tensor expert_weights,    // [num_experts, expert_dim, hidden_dim]
-    int num_experts,
-    int expert_dim,
-    int hidden_dim,
-    int top_k,
-    int num_gpus,
-    int my_gpu_id,
-    bool use_fp8,
-    bool use_sparse
-);
+// Forward declarations of CUDA functions with C linkage
+extern "C" {
+    void flash_dmoe_persistent_kernel_wrapper(
+        const void* input_tokens,
+        const void* gate_weights,
+        const void* expert_weights,
+        void* output_tokens,
+        MoEConfig config,
+        int batch_size,
+        int my_gpu_id,
+        int num_blocks,
+        int threads_per_block,
+        cudaStream_t stream
+    );
+    
+    void flash_dmoe_init_kernel_wrapper(
+        void* work_queue,
+        int* queue_head,
+        int* queue_tail,
+        int* shutdown
+    );
+    
+    void flash_dmoe_shutdown_kernel_wrapper();
+}
 
 /*
  * Python-facing forward function
@@ -73,20 +86,46 @@ torch::Tensor flash_dmoe_forward(
         use_sparse = false;
     }
     
+    // Allocate output tensor
+    auto output = torch::empty_like(input_tokens);
+    
+    // Set up MoE configuration
+    MoEConfig config;
+    config.num_experts = num_experts;
+    config.expert_dim = expert_dim;
+    config.hidden_dim = hidden_dim;
+    config.top_k = top_k;
+    config.num_gpus = num_gpus;
+    config.expert_per_gpu = (num_experts + num_gpus - 1) / num_gpus;
+    config.use_fp8 = use_fp8;
+    config.use_sparse_24 = use_sparse;
+    
+    // Calculate grid dimensions
+    const int num_blocks = 108;  // H100 has 108 SMs
+    const int threads_per_block = 1024;  // 32 warps per block
+    
+    // Get CUDA stream (PyTorch 2.5+ API)
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(input_tokens.device().index());
+    
     // Launch kernel
-    return flash_dmoe_forward_launcher(
-        input_tokens,
-        gate_weights,
-        expert_weights,
-        num_experts,
-        expert_dim,
-        hidden_dim,
-        top_k,
-        num_gpus,
+    flash_dmoe_persistent_kernel_wrapper(
+        input_tokens.data_ptr(),
+        gate_weights.data_ptr(),
+        expert_weights.data_ptr(),
+        output.data_ptr(),
+        config,
+        batch_size,
         my_gpu_id,
-        use_fp8,
-        use_sparse
+        num_blocks,
+        threads_per_block,
+        stream
     );
+    
+    // Check for errors
+    cudaError_t err = cudaGetLastError();
+    TORCH_CHECK(err == cudaSuccess, "FlashDMoE kernel launch failed: ", cudaGetErrorString(err));
+    
+    return output;
 }
 
 /*
@@ -105,7 +144,7 @@ void flash_dmoe_init() {
     cudaMalloc(&shutdown, sizeof(int));
     
     // Launch init kernel
-    flash_dmoe_init_kernel_launcher(work_queue, queue_head, queue_tail, shutdown);
+    flash_dmoe_init_kernel_wrapper(work_queue, queue_head, queue_tail, shutdown);
     
     cudaDeviceSynchronize();
 }
@@ -114,7 +153,7 @@ void flash_dmoe_init() {
  * Shutdown persistent kernel
  */
 void flash_dmoe_shutdown() {
-    flash_dmoe_shutdown_kernel_launcher();
+    flash_dmoe_shutdown_kernel_wrapper();
     cudaDeviceSynchronize();
 }
 
@@ -155,89 +194,3 @@ void flash_dmoe_persistent_kernel_wrapper(
 
 void flash_dmoe_init_kernel_wrapper(void* work_queue, int* queue_head, int* queue_tail, int* shutdown);
 void flash_dmoe_shutdown_kernel_wrapper();
-
-/*
- * Kernel launcher implementation
- */
-torch::Tensor flash_dmoe_forward_launcher(
-    torch::Tensor input_tokens,
-    torch::Tensor gate_weights,
-    torch::Tensor expert_weights,
-    int num_experts,
-    int expert_dim,
-    int hidden_dim,
-    int top_k,
-    int num_gpus,
-    int my_gpu_id,
-    bool use_fp8,
-    bool use_sparse
-) {
-    const int batch_size = input_tokens.size(0);
-    
-    // Allocate output
-    auto output = torch::zeros_like(input_tokens);
-    
-    // Kernel launch configuration
-    const int threads_per_block = 16 * 32;  // 16 warps
-    const int num_blocks = (batch_size + 127) / 128;  // 128 tokens per block
-    
-    // Build config struct
-    struct MoEConfig {
-        int num_experts;
-        int expert_dim;
-        int hidden_dim;
-        int top_k;
-        int num_gpus;
-        int expert_per_gpu;
-        bool use_fp8;
-        bool use_sparse_24;
-    };
-    
-    MoEConfig config;
-    config.num_experts = num_experts;
-    config.expert_dim = expert_dim;
-    config.hidden_dim = hidden_dim;
-    config.top_k = top_k;
-    config.num_gpus = num_gpus;
-    config.expert_per_gpu = (num_experts + num_gpus - 1) / num_gpus;
-    config.use_fp8 = use_fp8;
-    config.use_sparse_24 = use_sparse;
-    
-    // Get CUDA stream
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    
-    // Launch kernel
-    flash_dmoe_persistent_kernel_wrapper(
-        input_tokens.data_ptr(),
-        gate_weights.data_ptr(),
-        expert_weights.data_ptr(),
-        output.data_ptr(),
-        config,
-        batch_size,
-        my_gpu_id,
-        num_blocks,
-        threads_per_block,
-        stream
-    );
-    
-    // Check for errors
-    cudaError_t err = cudaGetLastError();
-    TORCH_CHECK(err == cudaSuccess, "FlashDMoE kernel launch failed: ", cudaGetErrorString(err));
-    
-    return output;
-}
-
-void flash_dmoe_init_kernel_launcher(
-    void* work_queue,
-    int* queue_head,
-    int* queue_tail,
-    int* shutdown
-) {
-    flash_dmoe_init_kernel_wrapper(work_queue, queue_head, queue_tail, shutdown);
-    cudaDeviceSynchronize();
-}
-
-void flash_dmoe_shutdown_kernel_launcher() {
-    flash_dmoe_shutdown_kernel_wrapper();
-    cudaDeviceSynchronize();
-}
