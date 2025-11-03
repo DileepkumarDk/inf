@@ -94,22 +94,64 @@ def main():
         print(f"  {Colors.RED}✗ Error checking CUDA: {e}{Colors.END}")
         all_passed = False
     
-    # 3. Check vLLM
+    # 3. Check vLLM with version validation (FIX #12: Enhanced version check)
     print(f"\n{Colors.BLUE}[3/7] Checking vLLM...{Colors.END}")
     try:
         import vllm
         print(f"  {Colors.GREEN}✓ vLLM installed{Colors.END}")
-        print(f"    Version: {vllm.__version__}")
+        
+        vllm_version = vllm.__version__
+        print(f"    Version: {vllm_version}")
+        
+        # FIX #12: Check minimum version (0.6.0+ recommended for all features)
+        try:
+            # Parse version more robustly
+            version_str = vllm_version.split('+')[0]  # Remove commit hash if present
+            version_parts = version_str.split('.')
+            major = int(version_parts[0])
+            minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+            patch = int(version_parts[2]) if len(version_parts) > 2 else 0
+            
+            if major == 0 and minor < 3:
+                print(f"  {Colors.RED}✗ vLLM version {vllm_version} is too old{Colors.END}")
+                print(f"    Required: 0.3.0+ (minimum)")
+                print(f"    Recommended: 0.6.0+ (for full features)")
+                print(f"    Install: pip install --upgrade vllm")
+                all_passed = False
+            elif major == 0 and minor < 6:
+                print(f"  {Colors.YELLOW}⚠️  vLLM version {vllm_version} is functional but old{Colors.END}")
+                print(f"    Recommended: 0.6.0+ for all features")
+                print(f"    Some optimizations may not be available")
+            else:
+                print(f"  {Colors.GREEN}✓ vLLM version is compatible{Colors.END}")
+        except (ValueError, IndexError) as e:
+            print(f"  {Colors.YELLOW}⚠️  Could not parse vLLM version: {e}{Colors.END}")
+            print(f"    Assuming compatible, but verify manually")
+            
     except ImportError:
         print(f"  {Colors.RED}✗ vLLM not found{Colors.END}")
         print(f"    Install: pip install vllm")
         all_passed = False
     
-    # 4. Check Transformer Engine
+    # 4. Check Transformer Engine with version validation
     print(f"\n{Colors.BLUE}[4/7] Checking Transformer Engine (FP8)...{Colors.END}")
     try:
         import transformer_engine
         print(f"  {Colors.GREEN}✓ Transformer Engine installed{Colors.END}")
+        
+        # Version check (FIX: Add version validation)
+        try:
+            te_version = transformer_engine.__version__
+            print(f"    Version: {te_version}")
+            
+            # Check minimum version (1.0.0+)
+            major_version = int(te_version.split('.')[0])
+            if major_version < 1:
+                print(f"  {Colors.YELLOW}⚠️  Warning: TransformerEngine version {te_version} is old{Colors.END}")
+                print(f"    Recommended: 1.0.0+")
+                all_passed = False
+        except (AttributeError, ValueError):
+            print(f"  {Colors.YELLOW}⚠️  Could not determine TransformerEngine version{Colors.END}")
         
         # Check if H100 available for FP8
         import torch
@@ -191,13 +233,13 @@ def main():
     if all_passed:
         print(f"{Colors.GREEN}✓ VALIDATION PASSED{Colors.END}")
         print("\nYou're ready to start! Next steps:")
-        print("  1. Review SETUP_GUIDE.md for detailed instructions")
-        print("  2. Download a test model (see Phase 6 in guide)")
-        print("  3. Run your first baseline benchmark")
+        print("  1. Review README.md for quick start guide")
+        print("  2. Review BENCHMARK_PROTOCOL.md for testing phases")
+        print("  3. Start with Stage 1 (FP8 + DBO) - works immediately")
     else:
         print(f"{Colors.RED}✗ VALIDATION FAILED{Colors.END}")
         print("\nPlease install missing components:")
-        print("  - See SETUP_GUIDE.md for installation instructions")
+        print("  - See README.md for installation instructions")
         print("  - Run this script again after installation")
     print("=" * 70)
     

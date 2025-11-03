@@ -113,6 +113,26 @@ class ExpertPlacementOptimizer:
         Returns:
             Dict mapping expert_id -> gpu_id
         """
+        # FIX #14: Validate GPU availability before placement
+        try:
+            import torch
+            if torch.cuda.is_available():
+                available_gpus = torch.cuda.device_count()
+                if available_gpus < self.num_gpus:
+                    self.logger.warning(
+                        f"Requested {self.num_gpus} GPUs but only {available_gpus} available. "
+                        f"Adjusting to {available_gpus} GPUs."
+                    )
+                    self.num_gpus = available_gpus
+                elif self.num_gpus < 1:
+                    self.logger.error("num_gpus must be at least 1")
+                    self.num_gpus = 1
+        except ImportError:
+            self.logger.warning("PyTorch not available, cannot validate GPU count")
+            # Ensure at least 1 GPU for placement
+            if self.num_gpus < 1:
+                self.num_gpus = 1
+        
         if routing_stats is None:
             routing_stats = self._routing_stats
         
@@ -126,21 +146,40 @@ class ExpertPlacementOptimizer:
             self._placement_map = placement
             return placement
         
-        # Affinity-based placement using co-activation matrix
+        # BUG FIX #4: Use affinity-based placement with co-activation matrix
         expert_frequencies = np.array(routing_stats["expert_frequencies"])
         co_activation = np.array(routing_stats["co_activation_matrix"])
         
         # Sort experts by frequency (descending)
         sorted_experts = np.argsort(expert_frequencies)[::-1]
         
-        # Assign experts to GPUs with load balancing
+        # Assign experts to GPUs with affinity-aware load balancing
         gpu_loads = np.zeros(self.num_gpus)
         placement = {}
+        gpu_experts = {gpu_id: [] for gpu_id in range(self.num_gpus)}  # Track experts per GPU
         
         for expert_id in sorted_experts:
-            # Find GPU with minimum load
-            target_gpu = int(np.argmin(gpu_loads))
+            # Calculate affinity cost for placing this expert on each GPU
+            gpu_costs = np.zeros(self.num_gpus)
+            
+            for gpu_id in range(self.num_gpus):
+                # Base cost: load imbalance
+                load_cost = gpu_loads[gpu_id]
+                
+                # Affinity cost: sum of co-activation with experts on different GPUs
+                affinity_cost = 0.0
+                for other_expert in range(self.num_experts):
+                    if other_expert in placement and placement[other_expert] != gpu_id:
+                        # Penalty for separating co-activated experts
+                        affinity_cost += abs(co_activation[expert_id, other_expert])
+                
+                # Combined cost (weighted: 60% affinity, 40% load balance)
+                gpu_costs[gpu_id] = 0.6 * affinity_cost + 0.4 * load_cost
+            
+            # Assign to GPU with minimum cost
+            target_gpu = int(np.argmin(gpu_costs))
             placement[int(expert_id)] = target_gpu
+            gpu_experts[target_gpu].append(int(expert_id))
             
             # Update load
             gpu_loads[target_gpu] += expert_frequencies[expert_id]

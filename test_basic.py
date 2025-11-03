@@ -20,7 +20,7 @@ def test_config_creation():
     print("="*70)
     
     config = OptimizationConfig(
-        model_path="mistralai/Mixtral-8x7B-Instruct-v0.1",
+        model_path="test/model/path",  # Generic path for testing
         model_type="moe",
         num_gpus=3,
         enable_fp8=True,

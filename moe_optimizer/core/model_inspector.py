@@ -37,10 +37,23 @@ class ModelInspector:
     """
     
     # Known model families and their properties
+    # FIX #6: Enhanced Qwen3 detection with multiple patterns
     KNOWN_MODELS = {
         "mixtral": {
             "8x7b": {"num_experts": 8, "experts_per_token": 2, "size_gb": 90},
             "8x22b": {"num_experts": 8, "experts_per_token": 2, "size_gb": 281},
+        },
+        "qwen3": {
+            "30b-a3b": {"num_experts": 128, "experts_per_token": 8, "size_gb": 31},  # Qwen3-30B-A3B
+            "30b": {"num_experts": 128, "experts_per_token": 8, "size_gb": 31},  # Alternative naming
+        },
+        "qwen2.5": {
+            "57b-a14b": {"num_experts": 64, "experts_per_token": 8, "size_gb": 57},  # Qwen2.5-MoE
+            "14b": {"num_experts": 60, "experts_per_token": 4, "size_gb": 14},  # Qwen2.5-14B-MoE
+        },
+        "qwen": {
+            # Fallback for generic "qwen" patterns
+            "moe": {"num_experts": 64, "experts_per_token": 4, "size_gb": 30},
         },
         "deepseek": {
             "6.7b": {"num_experts": 8, "experts_per_token": 2, "size_gb": 26},
@@ -104,13 +117,26 @@ class ModelInspector:
             "architecture": config.architectures[0] if hasattr(config, "architectures") else "unknown",
         }
         
-        # Check for MoE indicators
+        # Check for MoE indicators (supports multiple architectures)
         is_moe = False
         num_experts = None
         experts_per_token = None
         
+        # FIX #6: Qwen3-style (check FIRST as it has unique attributes)
+        # Qwen3-30B-A3B uses: num_experts=128, num_experts_per_tok=8
+        if hasattr(config, "num_experts") and hasattr(config, "num_experts_per_tok"):
+            is_moe = True
+            num_experts = config.num_experts
+            experts_per_token = config.num_experts_per_tok
+        # Qwen2.5-MoE uses: moe_intermediate_size, num_experts
+        elif hasattr(config, "num_experts") and hasattr(config, "moe_intermediate_size"):
+            is_moe = True
+            num_experts = config.num_experts
+            experts_per_token = getattr(config, "num_experts_per_tok", 
+                                       getattr(config, "num_shared_expert_per_tok", 2))
+        
         # Mixtral-style
-        if hasattr(config, "num_local_experts"):
+        elif hasattr(config, "num_local_experts"):
             is_moe = True
             num_experts = config.num_local_experts
             experts_per_token = getattr(config, "num_experts_per_tok", 2)
@@ -218,10 +244,25 @@ class ModelInspector:
                         logger.info(f"Matched known model: {family}-{variant}")
                         return result
         
-        # Check for generic MoE indicators
-        if any(x in model_lower for x in ["moe", "mixture", "mixtral", "expert"]):
+        # FIX #6: Enhanced generic MoE detection with Qwen3 patterns
+        qwen3_patterns = ["qwen3", "qwen-3", "qwen3-", "qwen-moe", "a3b", "a14b"]
+        other_moe_patterns = ["moe", "mixture", "mixtral", "qwen2.5-moe", "expert"]
+        
+        if any(x in model_lower for x in qwen3_patterns + other_moe_patterns):
             result["is_moe"] = True
-            logger.warning("Detected MoE from name, but couldn't determine expert count")
+            
+            # Try to infer Qwen3 specifics from name
+            if any(x in model_lower for x in qwen3_patterns):
+                if "30b" in model_lower:
+                    result["num_experts"] = 128
+                    result["experts_per_token"] = 8
+                    result["estimated_size_gb"] = 31
+                    result["architecture"] = "qwen3-30b-a3b"
+                    logger.info("Detected Qwen3-30B-A3B from name pattern")
+                else:
+                    logger.warning("Detected Qwen3 MoE from name, but couldn't determine specific variant")
+            else:
+                logger.warning("Detected MoE from name, but couldn't determine expert count")
         
         # Try to extract size from name (e.g., "7b", "13b")
         import re

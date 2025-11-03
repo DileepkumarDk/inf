@@ -4,18 +4,19 @@
 
 model_path: "YOUR_MODEL_HERE"  # Set via --model or replace this
 model_type: "moe"
-num_gpus: 1  # Will auto-adjust based on available GPUs and model size
-num_experts: 8  # Will auto-detect from model config if available
+num_gpus: 1  # FIX #10: Single GPU is sufficient for Qwen3-30B (fits in 80GB)
+num_experts: 128  # FIX #10: Qwen3-30B-A3B has 128 experts (not 8)
+experts_per_token: 8  # FIX #10: Qwen3 activates top-8 experts
 max_model_len: 4096
 
 # Quantization (aggressive)
 enable_fp8: true
 fp8_router_precision: "fp8"  # Router in FP8 for max speed
 
-# Batch processing (larger batches)
+# Batch processing (larger batches for 128 experts)
 enable_dual_batch_overlap: true
-max_num_batched_tokens: 12288
-max_num_seqs: 384
+max_num_batched_tokens: 32768  # FIX #10: Increased for 128 experts (4× larger)
+max_num_seqs: 1024  # FIX #10: More parallelism for Qwen3
 
 # Advanced optimizations (ALL enabled)
 enable_disaggregation: false  # Only enable if 2+ GPUs available
@@ -28,7 +29,7 @@ kv_cache_dtype_recent: "fp16"
 kv_cache_dtype_old: "fp8"
 
 enable_expert_placement: true
-experts_per_token: 2
+# experts_per_token already set above (line 6)
 
 enable_expert_sparsity: true
 expert_sparsity_ratio: "2:4"

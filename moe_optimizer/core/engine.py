@@ -59,6 +59,7 @@ class OptimizedMoEEngine:
         self._prefill_engine = None
         self._decode_engine = None
         self._model_info: Optional[Dict[str, Any]] = None
+        self.engine = None  # FIX: Initialize engine attribute to avoid AttributeError
         
         # Validate environment
         self._validate_environment()
@@ -160,8 +161,20 @@ class OptimizedMoEEngine:
         
         self.logger.debug(f"vLLM config: {vllm_config}")
         
-        # For now, we'll just store the config (actual vLLM initialization happens on GPU)
-        self._prefill_engine = {"type": "colocated", "config": vllm_config}
+        # FIX: Initialize actual vLLM engine if available
+        if VLLM_AVAILABLE:
+            try:
+                from vllm import LLM
+                self.engine = LLM(**vllm_config)
+                self.logger.info("✓ vLLM engine initialized")
+            except Exception as e:
+                self.logger.warning(f"Could not initialize vLLM engine: {e}")
+                self.engine = None
+                # Store config as fallback
+                self._prefill_engine = {"type": "colocated", "config": vllm_config}
+        else:
+            # For now, we'll just store the config (actual vLLM initialization happens on GPU)
+            self._prefill_engine = {"type": "colocated", "config": vllm_config}
         
         self.logger.info("✓ Colocated engine configured")
     
@@ -241,14 +254,45 @@ class OptimizedMoEEngine:
         """Generate with colocated engine"""
         self.logger.debug("Using colocated generation")
         
-        # TODO: Actual vLLM generation
-        # For now, return structure
+        # Use vLLM for actual generation if available
+        if self.engine is not None:
+            try:
+                from vllm import SamplingParams
+                
+                # Create sampling parameters
+                sampling_params = SamplingParams(
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens
+                )
+                
+                # Generate
+                outputs = self.engine.generate(prompts, sampling_params)
+                
+                # Format results
+                results = []
+                for output in outputs:
+                    results.append({
+                        "prompt": output.prompt,
+                        "text": output.outputs[0].text,
+                        "tokens": len(output.outputs[0].token_ids),
+                        "mode": "colocated",
+                        "finish_reason": output.outputs[0].finish_reason
+                    })
+                
+                return results
+                
+            except Exception as e:
+                self.logger.warning(f"vLLM generation failed: {e}, using mock")
+        
+        # Fallback: return mock structure
         return [
             {
                 "prompt": prompt,
                 "text": f"[Generated response for: {prompt[:50]}...]",
                 "tokens": max_tokens,
-                "mode": "colocated"
+                "mode": "colocated",
+                "warning": "vLLM not available - mock response"
             }
             for prompt in prompts
         ]
@@ -263,28 +307,58 @@ class OptimizedMoEEngine:
         """Generate with disaggregated prefill/decode"""
         self.logger.debug("Using disaggregated generation")
         
+        # Disaggregated generation splits prefill and decode across GPUs
+        # This is a complex implementation that requires vLLM modifications
+        
         results = []
         for prompt in prompts:
-            # Step 1: Prefill on GPU 0
-            self.logger.debug(f"Prefill: {prompt[:50]}...")
-            # TODO: Actual prefill logic
-            
-            # Step 2: Transfer KV cache to decode GPUs
-            self.logger.debug("Transferring KV cache to decode GPUs")
-            # TODO: KV cache transfer
-            
-            # Step 3: Decode on GPU 1-2
-            self.logger.debug("Decode phase")
-            # TODO: Actual decode logic
-            
-            results.append({
-                "prompt": prompt,
-                "text": f"[Disaggregated response for: {prompt[:50]}...]",
-                "tokens": max_tokens,
-                "mode": "disaggregated",
-                "prefill_gpu": self.config.prefill_gpu_ids[0],
-                "decode_gpus": self.config.decode_gpu_ids,
-            })
+            try:
+                # Step 1: Prefill on dedicated prefill GPU
+                prefill_gpu = self.config.prefill_gpu_ids[0]
+                self.logger.debug(f"Prefill on GPU {prefill_gpu}: {prompt[:50]}...")
+                
+                # In production, this would:
+                # 1. Run prefill forward pass on GPU 0
+                # 2. Generate KV cache
+                # Note: This requires vLLM patch to separate prefill/decode
+                
+                if self.engine is not None:
+                    # Use patched vLLM (if disaggregation patch applied)
+                    # For now, fall back to colocated generation
+                    self.logger.warning("Disaggregation requires vLLM patches - using colocated")
+                    return self._generate_colocated(prompts, max_tokens, temperature, top_p)
+                
+                # Step 2: Transfer KV cache to decode GPUs via NVLink
+                decode_gpus = self.config.decode_gpu_ids
+                self.logger.debug(f"Transferring KV cache to decode GPUs: {decode_gpus}")
+                
+                # In production:
+                # - Use torch.cuda IPC for zero-copy transfer
+                # - Or NVSHMEM for device-initiated transfer
+                # - Transfer is ~10-20GB/s with NVLink
+                
+                # Step 3: Decode on dedicated decode GPUs
+                self.logger.debug(f"Decode on GPUs {decode_gpus}")
+                
+                # In production:
+                # - Run decode loop on GPUs 1-2
+                # - Each token generation uses transferred KV cache
+                # - Overlap decode with next prefill
+                
+                results.append({
+                    "prompt": prompt,
+                    "text": f"[Disaggregated response for: {prompt[:50]}...]",
+                    "tokens": max_tokens,
+                    "mode": "disaggregated",
+                    "prefill_gpu": prefill_gpu,
+                    "decode_gpus": decode_gpus,
+                    "warning": "Disaggregation requires vLLM patches"
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Disaggregated generation error: {e}")
+                # Fallback to colocated
+                return self._generate_colocated(prompts, max_tokens, temperature, top_p)
         
         return results
     

@@ -9,7 +9,7 @@ This package implements production-ready optimizations for MoE models:
 - Dynamic expert placement
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __author__ = "Your Team"
 
 from .core.engine import OptimizedMoEEngine

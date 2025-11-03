@@ -5,6 +5,11 @@
 # PURPOSE: Install EVERYTHING needed for MoE optimization in one shot
 # USAGE: bash h100_complete_setup.sh [model_name]
 # 
+# ⚠️  WINDOWS USERS: This is a bash script for Linux/WSL
+#     - Run in WSL (Windows Subsystem for Linux)
+#     - OR use Git Bash
+#     - OR convert to PowerShell (see setup_windows.ps1 if available)
+# 
 # This script will:
 # 1. Install all system dependencies
 # 2. Set up Python environment
@@ -56,7 +61,15 @@ print_header() {
 ################################################################################
 
 # Get model from command line or use default
-MODEL_NAME="${1:-mistralai/Mixtral-8x7B-Instruct-v0.1}"
+# FIX: Better default model selection - use smaller model for testing
+if [ -z "$1" ]; then
+    print_warning "No model specified. Using default: mistralai/Mixtral-8x7B-Instruct-v0.1"
+    print_info "For Qwen3-30B, run: bash $0 Qwen/Qwen3-30B-A3B"
+    print_info "For smaller test, run: bash $0 microsoft/Phi-3.5-MoE-instruct"
+    MODEL_NAME="mistralai/Mixtral-8x7B-Instruct-v0.1"
+else
+    MODEL_NAME="$1"
+fi
 MODEL_DIR="./models/$(echo $MODEL_NAME | tr '/' '-')"
 
 print_header "H100 COMPLETE SETUP SCRIPT"
@@ -105,24 +118,65 @@ sleep 2
 
 print_header "PHASE 2: INSTALLING SYSTEM DEPENDENCIES (2/7)"
 
+# FIX: Only update if we have sudo
 print_info "Updating package lists..."
-sudo apt-get update -qq
+if [ "$HAS_SUDO" = true ] 2>/dev/null || sudo -n true 2>/dev/null; then
+    sudo apt-get update -qq
+else
+    print_warning "Skipping apt-get update (no sudo access)"
+fi
 
+# FIX: Add more development tools and check sudo availability
 print_info "Installing build essentials..."
-sudo apt-get install -y -qq \
-    build-essential \
-    wget \
-    curl \
-    git \
-    python3.10 \
-    python3.10-venv \
-    python3-pip \
-    cmake \
-    ninja-build \
-    software-properties-common \
-    htop \
-    tmux \
-    > /dev/null 2>&1
+
+# Check if we have sudo rights
+if sudo -n true 2>/dev/null; then
+    HAS_SUDO=true
+elif sudo -v 2>/dev/null; then
+    HAS_SUDO=true
+else
+    print_warning "No sudo access. Some system packages may need manual installation."
+    HAS_SUDO=false
+fi
+
+if [ "$HAS_SUDO" = true ]; then
+    sudo apt-get install -y \
+        build-essential \
+        wget \
+        curl \
+        git \
+        python3 \
+        python3-venv \
+        python3-pip \
+        python3-dev \
+        cmake \
+        ninja-build \
+        software-properties-common \
+        htop \
+        tmux \
+        vim \
+        screen \
+        libssl-dev \
+        zlib1g-dev \
+        libbz2-dev \
+        libreadline-dev \
+        libsqlite3-dev \
+        llvm \
+        libncurses5-dev \
+        libncursesw5-dev \
+        xz-utils \
+        tk-dev \
+        libffi-dev \
+        liblzma-dev
+
+    if [ $? -ne 0 ]; then
+        print_error "Failed to install system dependencies"
+        exit 1
+    fi
+else
+    print_warning "Skipping system dependencies (no sudo). Ensure these are installed:"
+    print_info "  build-essential, python3-dev, cmake, git, etc."
+fi
 
 print_success "System dependencies installed ✓"
 sleep 1
@@ -133,20 +187,32 @@ sleep 1
 
 print_header "PHASE 3: SETTING UP PYTHON ENVIRONMENT (3/7)"
 
-# Check if virtual env already exists
-if [ -d "~/moe_venv" ]; then
-    print_warning "Virtual environment already exists. Removing old one..."
-    rm -rf ~/moe_venv
+# Check if we're in a conda environment (Lightning Studio)
+if command -v conda &> /dev/null; then
+    print_info "Conda detected (Lightning Studio environment)"
+    print_info "Using existing conda environment..."
+    
+    # Make sure we're in the base/default environment
+    if [ -z "$CONDA_DEFAULT_ENV" ]; then
+        print_info "Activating conda base environment..."
+        eval "$(conda shell.bash hook)"
+        conda activate base
+    else
+        print_info "Already in conda environment: $CONDA_DEFAULT_ENV"
+    fi
+else
+    # Fallback to venv for non-conda systems
+    print_info "Creating Python virtual environment..."
+    if [ -d "~/moe_venv" ]; then
+        print_warning "Virtual environment already exists. Removing old one..."
+        rm -rf ~/moe_venv
+    fi
+    python3 -m venv ~/moe_venv
+    source ~/moe_venv/bin/activate
 fi
 
-print_info "Creating Python virtual environment..."
-python3.10 -m venv ~/moe_venv
-
-print_info "Activating virtual environment..."
-source ~/moe_venv/bin/activate
-
 print_info "Upgrading pip..."
-pip install --upgrade pip setuptools wheel -q
+pip install --upgrade pip setuptools wheel
 
 PYTHON_VERSION=$(python --version)
 print_success "Python environment ready: $PYTHON_VERSION ✓"
@@ -158,10 +224,22 @@ sleep 1
 
 print_header "PHASE 4: INSTALLING PYTORCH + CUDA (4/7)"
 
-print_info "Installing PyTorch 2.1.0 with CUDA 12.1..."
+# FIX: Check CUDA version and install matching PyTorch
+CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | cut -d. -f1,2)
+print_info "Detected CUDA Version: ${CUDA_VERSION:-12.1}"
+
+print_info "Installing PyTorch with CUDA ${CUDA_VERSION:-12.1}..."
 print_info "This may take 5-10 minutes..."
 
-pip install torch==2.1.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 -q
+# Install PyTorch matching CUDA version
+if [[ "$CUDA_VERSION" == "12.4" ]] || [[ "$CUDA_VERSION" == "12.3" ]] || [[ "$CUDA_VERSION" == "12.2" ]]; then
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+elif [[ "$CUDA_VERSION" == "11.8" ]]; then
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+else
+    # Default to CUDA 12.1
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+fi
 
 print_info "Verifying PyTorch installation..."
 python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available!'; print(f'✓ PyTorch {torch.__version__} with CUDA {torch.version.cuda}')"
@@ -176,28 +254,59 @@ sleep 1
 
 print_header "PHASE 5: INSTALLING VLLM + OPTIMIZATION LIBRARIES (5/7)"
 
-print_info "Installing vLLM 0.6.3..."
-pip install vllm==0.6.3 -q
+# FIX: vLLM 0.6.3 may be outdated, use latest stable or 0.6.0+ range
+print_info "Installing vLLM (latest stable)..."
+pip install "vllm>=0.6.0"
 
+# FIX: Add error handling for Transformer Engine installation
 print_info "Installing Transformer Engine (FP8 support)..."
-pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable -q
+if pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable; then
+    print_success "Transformer Engine installed successfully"
+else
+    print_warning "Transformer Engine installation failed (may not be critical for basic usage)"
+    print_info "You can still use FP8 through vLLM's built-in quantization"
+fi
 
+# FIX: Add more dependencies and specify minimum versions
 print_info "Installing additional dependencies..."
-pip install -q \
-    transformers>=4.36.0 \
-    accelerate>=0.25.0 \
+pip install \
+    "transformers>=4.45.0" \
+    "accelerate>=0.25.0" \
     sentencepiece \
-    protobuf \
-    huggingface-hub \
+    "protobuf>=3.20.0" \
+    "huggingface-hub>=0.19.0" \
     pyyaml \
-    numpy \
+    "numpy>=1.24.0" \
     pandas \
     aiohttp \
-    colorama
+    colorama \
+    pytest \
+    pytest-cov \
+    tqdm \
+    tabulate
 
 print_info "Verifying installations..."
-python -c "import vllm; print(f'✓ vLLM {vllm.__version__}')"
-python -c "import transformer_engine; print('✓ Transformer Engine installed')" 2>/dev/null || print_warning "Transformer Engine verification failed (may still work)"
+
+# FIX: More robust verification with error handling
+if python -c "import vllm; print(f'✓ vLLM {vllm.__version__}')" 2>/dev/null; then
+    print_success "vLLM verified"
+else
+    print_error "vLLM verification failed!"
+    exit 1
+fi
+
+# Check Transformer Engine (optional)
+if python -c "import transformer_engine; print('✓ Transformer Engine installed')" 2>/dev/null; then
+    print_success "Transformer Engine verified"
+else
+    print_warning "Transformer Engine not available (optional, vLLM has built-in FP8)"
+fi
+
+# Verify other critical imports
+python -c "import transformers; import torch; import accelerate" 2>/dev/null || {
+    print_error "Critical imports failed!"
+    exit 1
+}
 
 print_success "All libraries installed ✓"
 sleep 1
@@ -307,12 +416,16 @@ import vllm
 print('  ✓ vLLM imports correctly')
 "
 
-# Test 3: Model files
+# Test 3: Model files (FIX: Check for either tokenizer.json or tokenizer.model)
 print_info "[3/5] Checking model files..."
-if [ -f "$MODEL_DIR/config.json" ] && [ -f "$MODEL_DIR/tokenizer.json" ]; then
-    print_info "  ✓ Model files present"
+if [ -f "$MODEL_DIR/config.json" ]; then
+    if [ -f "$MODEL_DIR/tokenizer.json" ] || [ -f "$MODEL_DIR/tokenizer.model" ] || [ -f "$MODEL_DIR/tokenizer_config.json" ]; then
+        print_info "  ✓ Model files present"
+    else
+        print_warning "  Tokenizer file may be missing (tokenizer.json or tokenizer.model)"
+    fi
 else
-    print_warning "  Some model files may be missing"
+    print_warning "  config.json not found - model may be incomplete"
 fi
 
 # Test 4: Optimizer code
@@ -357,8 +470,12 @@ echo "==========================================================================
 echo "NEXT STEPS:"
 echo "================================================================================"
 echo ""
-echo "1. Activate the virtual environment (if not already active):"
-echo "   ${GREEN}source ~/moe_venv/bin/activate${NC}"
+echo "1. Activate the environment (if not already active):"
+if command -v conda &> /dev/null; then
+    echo "   ${GREEN}conda activate base${NC}  # (or your conda env)"
+else
+    echo "   ${GREEN}source ~/moe_venv/bin/activate${NC}"
+fi
 echo ""
 echo "2. Set your model path for easy reference:"
 echo "   ${GREEN}export MODEL_PATH='$MODEL_DIR'${NC}"
@@ -405,8 +522,12 @@ echo "Expected with FP8+DBO: 20,000-50,000 tokens/sec"
 echo "Expected with all opts: 100,000-1,000,000+ tokens/sec"
 echo ""
 echo "================================================================================"
-echo "💡 TIP: Keep this terminal open and source the venv in new terminals:"
-echo "    ${GREEN}source ~/moe_venv/bin/activate${NC}"
+if command -v conda &> /dev/null; then
+    echo "💡 TIP: You're using conda (Lightning Studio). Environment is persistent."
+else
+    echo "💡 TIP: Keep this terminal open and source the venv in new terminals:"
+    echo "    ${GREEN}source ~/moe_venv/bin/activate${NC}"
+fi
 echo "================================================================================"
 echo ""
 echo "🚀 Ready to benchmark! Follow BENCHMARK_PROTOCOL.md for next steps."
@@ -421,8 +542,15 @@ export MODEL_PATH='$MODEL_DIR'
 export MODEL_NAME='$MODEL_NAME'
 export GPU_COUNT=$GPU_COUNT
 
-# Activate virtual environment
-source ~/moe_venv/bin/activate
+# Activate environment
+if command -v conda &> /dev/null; then
+    # Conda environment (Lightning Studio)
+    eval "\$(conda shell.bash hook)"
+    conda activate base 2>/dev/null || true
+else
+    # venv environment
+    source ~/moe_venv/bin/activate
+fi
 
 echo "🚀 MoE environment loaded!"
 echo "   Model: \$MODEL_NAME"

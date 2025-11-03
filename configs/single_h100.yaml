@@ -2,20 +2,21 @@
 # Optimized for 4B-7B MoE models on 1× H100 SXM (80GB)
 # Perfect for: DeepSeek-Coder-6.7B, Phi-3.5-MoE-Instruct, small Mixtral models
 
-model_path: "REPLACE_WITH_YOUR_MODEL"  # e.g., "deepseek-ai/deepseek-coder-6.7b-instruct"
+model_path: "REPLACE_WITH_YOUR_MODEL"  # e.g., "Qwen/Qwen3-30B-A3B" or "deepseek-ai/deepseek-coder-6.7b-instruct"
 model_type: "moe"
-num_gpus: 1  # Single H100
-num_experts: 8  # ADJUST BASED ON YOUR MODEL
+num_gpus: 1  # Single H100 (80GB - perfect for Qwen3-30B)
+num_experts: 128  # FIX #10: Default for Qwen3-30B-A3B (adjust for other models)
+experts_per_token: 8  # FIX #10: Top-8 for Qwen3
 max_model_len: 4096
 
 # Quantization (FP8 enabled - H100 native)
 enable_fp8: true
 fp8_router_precision: "fp16"  # Keep router accurate
 
-# Batch processing (optimized for single GPU)
+# Batch processing (optimized for single GPU with 128 experts)
 enable_dual_batch_overlap: true
-max_num_batched_tokens: 16384  # Single H100 can handle large batches
-max_num_seqs: 512  # High concurrency
+max_num_batched_tokens: 32768  # FIX #10: Increased for Qwen3's 128 experts
+max_num_seqs: 1024  # FIX #10: High concurrency for many experts
 
 # Advanced optimizations
 enable_disaggregation: false  # Requires 2+ GPUs
@@ -25,7 +26,7 @@ kv_cache_dtype_recent: "fp16"
 kv_cache_dtype_old: "fp8"
 
 enable_expert_placement: true  # Still useful for cache locality
-experts_per_token: 2  # Standard for most MoE
+# experts_per_token already set above (line 5)
 
 enable_expert_sparsity: false  # Optional - requires fine-tuning
 

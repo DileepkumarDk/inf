@@ -8,6 +8,7 @@ from .disaggregation import PrefillDecodeDisaggregator
 from .kv_cache import KVCacheTieringOptimizer
 from .expert_placement import ExpertPlacementOptimizer
 from .sparsity import StructuredSparsityOptimizer
+from .flash_dmoe import FlashDMoEOptimizer
 
 __all__ = [
     "FP8QuantizationOptimizer",
@@ -16,4 +17,5 @@ __all__ = [
     "KVCacheTieringOptimizer",
     "ExpertPlacementOptimizer",
     "StructuredSparsityOptimizer",
+    "FlashDMoEOptimizer",
 ]

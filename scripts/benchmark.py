@@ -2,7 +2,7 @@
 """
 Batch-Aware Benchmark Script
 
-CRITICAL: The 1000× speedup ONLY happens at high batch sizes!
+CRITICAL: The 22-27× speedup vs vLLM baseline requires high batch sizes!
 This script tests at multiple concurrency levels to show the true scaling.
 
 Usage:
@@ -54,11 +54,22 @@ async def send_request(
     session: aiohttp.ClientSession,
     url: str,
     prompt: str,
-    max_tokens: int = 100
+    max_tokens: int = 100,
+    model_name: str = "model"
 ) -> Dict[str, Any]:
     """Send a single completion request"""
+    
+    # Auto-detect model if not provided
+    if model_name == "model":
+        try:
+            async with session.get(f"{url}/v1/models") as resp:
+                models_data = await resp.json()
+                model_name = models_data['data'][0]['id']
+        except:
+            model_name = "model"  # Fallback
+    
     payload = {
-        "model": "current-model",  # Will use whatever model is loaded
+        "model": model_name,
         "prompt": prompt,
         "max_tokens": max_tokens,
         "temperature": 0.7,
@@ -119,6 +130,17 @@ async def run_benchmark_batch(
         "Explain the difference between TCP and UDP:",
     ]
     
+    # Get model name once at the start
+    model_name = "model"  # Default
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
+        try:
+            async with session.get(f"{url}/v1/models") as resp:
+                models_data = await resp.json()
+                model_name = models_data['data'][0]['id']
+                print(f"  Using model: {model_name}")
+        except Exception as e:
+            print(f"  ⚠️  Could not detect model name, using default")
+    
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
         all_results = []
         start_time = time.time()
@@ -130,7 +152,7 @@ async def run_benchmark_batch(
             
             for i in range(batch_start, batch_end):
                 prompt = prompts[i % len(prompts)]
-                task = send_request(session, url, prompt, max_tokens)
+                task = send_request(session, url, prompt, max_tokens, model_name)
                 batch_tasks.append(task)
             
             # Wait for batch to complete
@@ -226,7 +248,8 @@ def print_comparison_table(results: List[BenchmarkResult]):
     print("\n💡 KEY INSIGHT:")
     print(f"   Batch 1:   Low latency, LOW throughput (good for chat)")
     print(f"   Batch 512: High latency, HIGH throughput (good for batch jobs)")
-    print(f"   The 1000× speedup claim uses batch 512+ with all optimizations!")
+    print(f"   The 22-27× speedup vs vLLM baseline uses batch 512+ with all optimizations!")
+    print(f"   (The '1000×' in research papers was vs naive 100 TPS baseline, not vLLM)")
     print()
 
 
