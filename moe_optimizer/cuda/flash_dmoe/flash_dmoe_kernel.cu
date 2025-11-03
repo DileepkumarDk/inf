@@ -36,12 +36,13 @@ using namespace nvcuda;
 namespace cg = cooperative_groups;
 
 // Constants
-#define MAX_TOKENS_PER_BLOCK 128
-#define MAX_EXPERTS 128  // Support up to 128 experts (Qwen3-30B-A3B, DeepSeek-V3)
-#define MAX_TOP_K 8      // Support up to top-8 routing (Qwen3)
+#define MAX_TOKENS_PER_BLOCK 32   // Reduced to fit shared memory (was 128)
+#define MAX_EXPERTS 128           // Support up to 128 experts (Qwen3-30B-A3B, DeepSeek-V3)
+#define MAX_TOP_K 8               // Support up to top-8 routing (Qwen3)
+#define HIDDEN_DIM 512            // Reduced working size in shared memory
 #define WARP_SIZE 32
 #define NUM_WARPS 16
-#define SHARED_MEM_SIZE 98304  // 96KB per SM on H100 (increased for larger expert count)
+#define SHARED_MEM_SIZE 163840    // 160KB - just under H100's 166KB limit
 
 // FIX #4: Add bounds checking macro to prevent buffer overruns
 #define CHECK_EXPERT_ID(expert_id) \
@@ -88,20 +89,25 @@ struct WorkItem {
 };
 
 /*
- * Shared memory layout (48KB total)
+ * Shared memory layout - Optimized to fit within H100's 166KB limit
+ * Current usage: ~49KB (32 * 128 * 4) + (32 * 8 * 4) + (32 * 512 * 2) * 2 = 82KB
  */
 struct SharedMemory {
     // Gate scores: [MAX_TOKENS_PER_BLOCK, MAX_EXPERTS]
+    // 32 * 128 * 4 bytes = 16,384 bytes (16KB)
     __align__(16) float gate_scores[MAX_TOKENS_PER_BLOCK][MAX_EXPERTS];
     
     // Routing table: [MAX_TOKENS_PER_BLOCK, MAX_TOP_K] (which experts for each token)
-    __align__(16) int routing_table[MAX_TOKENS_PER_BLOCK][8];  // Support up to top-8 (Qwen3)
+    // 32 * 8 * 4 bytes = 1,024 bytes (1KB)
+    __align__(16) int routing_table[MAX_TOKENS_PER_BLOCK][8];
     
     // Expert outputs: [MAX_TOKENS_PER_BLOCK, HIDDEN_DIM]
-    __align__(16) half expert_outputs[MAX_TOKENS_PER_BLOCK][1024];
+    // 32 * 512 * 2 bytes = 32,768 bytes (32KB)
+    __align__(16) half expert_outputs[MAX_TOKENS_PER_BLOCK][HIDDEN_DIM];
     
     // Token staging buffer
-    __align__(16) half token_buffer[MAX_TOKENS_PER_BLOCK][1024];
+    // 32 * 512 * 2 bytes = 32,768 bytes (32KB)
+    __align__(16) half token_buffer[MAX_TOKENS_PER_BLOCK][HIDDEN_DIM];
     
     // Synchronization flags
     volatile int gate_done;
@@ -375,12 +381,6 @@ __device__ void warp_expert_compute(
         
         if (!uses_expert) {
             continue;
-        }
-        
-        // Load input token
-        half input_vec[32];
-        for (int i = lane_id; i < config.hidden_dim; i += WARP_SIZE) {
-            input_vec[i / WARP_SIZE] = smem->token_buffer[token_id][i];
         }
         
         // Expert forward pass: input @ expert_weights
