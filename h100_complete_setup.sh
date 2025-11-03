@@ -312,27 +312,48 @@ print_success "All libraries installed ✓"
 sleep 1
 
 ################################################################################
-# PHASE 6: DOWNLOAD MODEL
+# PHASE 6: DOWNLOAD MODEL (OPTIONAL - vLLM can auto-download)
 ################################################################################
 
-print_header "PHASE 6: DOWNLOADING MODEL (6/7)"
+print_header "PHASE 6: MODEL SETUP (6/7)"
 
 print_info "Model: $MODEL_NAME"
-print_info "Destination: $MODEL_DIR"
-print_warning "This will take 15-30 minutes depending on model size..."
+print_warning "NOTE: vLLM will automatically download models when needed."
+print_warning "You can skip manual download and let vLLM handle it."
+echo ""
+read -p "Download model manually now? (y/N): " -n 1 -r
+echo ""
 
-# Create models directory
-mkdir -p $MODEL_DIR
-
-# Check if model already exists
-if [ -d "$MODEL_DIR" ] && [ "$(ls -A $MODEL_DIR)" ]; then
-    print_warning "Model directory already exists and is not empty."
-    read -p "Re-download model? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_info "Skipping model download."
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    print_info "Destination: $MODEL_DIR"
+    print_warning "This will take 15-30 minutes depending on model size..."
+    
+    # Create models directory
+    mkdir -p $MODEL_DIR
+    
+    # Check if model already exists
+    if [ -d "$MODEL_DIR" ] && [ "$(ls -A $MODEL_DIR)" ]; then
+        print_warning "Model directory already exists and is not empty."
+        read -p "Re-download model? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Skipping model download."
+        else
+            print_info "Downloading model..."
+            python -c "
+from huggingface_hub import snapshot_download
+import os
+snapshot_download(
+    repo_id='$MODEL_NAME',
+    local_dir='$MODEL_DIR',
+    local_dir_use_symlinks=False,
+    resume_download=True
+)
+print('✓ Model downloaded')
+"
+        fi
     else
-        print_info "Downloading model..."
+        print_info "Downloading model (this is the longest step)..."
         python -c "
 from huggingface_hub import snapshot_download
 import os
@@ -346,22 +367,12 @@ print('✓ Model downloaded')
 "
     fi
 else
-    print_info "Downloading model (this is the longest step)..."
-    python -c "
-from huggingface_hub import snapshot_download
-import os
-snapshot_download(
-    repo_id='$MODEL_NAME',
-    local_dir='$MODEL_DIR',
-    local_dir_use_symlinks=False,
-    resume_download=True
-)
-print('✓ Model downloaded')
-"
+    print_info "Skipping manual download."
+    print_info "vLLM will download to ~/.cache/huggingface/ when you run it."
 fi
 
-# Verify model files
-if [ -f "$MODEL_DIR/config.json" ]; then
+# Verify model files (only if manually downloaded)
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
     print_success "Model downloaded successfully ✓"
     
     # Show model info
