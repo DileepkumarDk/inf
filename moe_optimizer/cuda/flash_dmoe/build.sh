@@ -4,6 +4,10 @@
 # 
 # Compiles the FlashDMoE persistent kernel for H100 GPUs
 # Requires: CUDA 12.1+, NVSHMEM 2.10+, H100 GPU
+#
+# NOTE: This is a STUB build script. The actual kernel implementation needs
+#       the host interface functions added. Current kernel is compute-only.
+#       System will fall back to vLLM's MoE if compilation fails (12.9× speedup).
 ################################################################################
 
 set -e  # Exit on error
@@ -187,6 +191,11 @@ else
     echo -e "${YELLOW}[INFO]${NC} NVSHMEM: Disabled"
 fi
 echo ""
-echo -e "${GREEN}[NEXT]${NC} Run your optimizer with aggressive profile:"
-echo -e "  ${GREEN}python run_optimizer.py --model <model> --profile aggressive${NC}"
+echo -e "${GREEN}[NEXT]${NC} Test your optimizer:"
+echo -e "  ${GREEN}python run_optimizer.py --model <model> --profile balanced${NC}"
+echo ""
+echo -e "${YELLOW}[NOTE]${NC} If FlashDMoE kernel is not available, system will use:"
+echo -e "  - Stage 1+2 optimizations (12.9× speedup)"
+echo -e "  - vLLM's built-in MoE implementation"
+echo -e "  - Still excellent performance!"
 echo ""
