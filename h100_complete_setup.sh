@@ -369,10 +369,11 @@ print('✓ Model downloaded')
 else
     print_info "Skipping manual download."
     print_info "vLLM will download to ~/.cache/huggingface/ when you run it."
+    print_success "Model setup complete (will auto-download on first use) ✓"
 fi
 
 # Verify model files (only if manually downloaded)
-if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
+if [[ $REPLY =~ ^[Yy]$ ]] && [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
     print_success "Model downloaded successfully ✓"
     
     # Show model info
@@ -396,7 +397,7 @@ try:
 except Exception as e:
     print(f'  (Could not auto-detect model properties)')
 " 2>/dev/null || print_info "(Model inspector not available yet)"
-else
+elif [[ $REPLY =~ ^[Yy]$ ]]; then
     print_error "Model download failed or incomplete!"
     exit 1
 fi
@@ -427,16 +428,16 @@ import vllm
 print('  ✓ vLLM imports correctly')
 "
 
-# Test 3: Model files (FIX: Check for either tokenizer.json or tokenizer.model)
+# Test 3: Model files (only if manually downloaded)
 print_info "[3/5] Checking model files..."
-if [ -f "$MODEL_DIR/config.json" ]; then
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
     if [ -f "$MODEL_DIR/tokenizer.json" ] || [ -f "$MODEL_DIR/tokenizer.model" ] || [ -f "$MODEL_DIR/tokenizer_config.json" ]; then
-        print_info "  ✓ Model files present"
+        print_info "  ✓ Model files present in $MODEL_DIR"
     else
         print_warning "  Tokenizer file may be missing (tokenizer.json or tokenizer.model)"
     fi
 else
-    print_warning "  config.json not found - model may be incomplete"
+    print_info "  ⚠ Model not downloaded locally (will auto-download when needed)"
 fi
 
 # Test 4: Optimizer code
