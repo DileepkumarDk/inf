@@ -100,9 +100,31 @@ echo ""
 # Compile Python binding
 echo -e "${BLUE}[2/3]${NC} Compiling Python binding..."
 
+# Get PyTorch paths more robustly
+TORCH_PATH=$(python -c "import torch; import os; print(os.path.dirname(torch.__file__))" 2>/dev/null)
+if [ -z "$TORCH_PATH" ]; then
+    echo -e "${RED}[ERROR]${NC} Could not find PyTorch installation!"
+    exit 1
+fi
+
+# Try to find torch include directory
+TORCH_INCLUDE="${TORCH_PATH}/include"
+if [ ! -d "$TORCH_INCLUDE" ]; then
+    # Try alternate location
+    TORCH_INCLUDE="${TORCH_PATH}/../include"
+fi
+
+if [ ! -d "$TORCH_INCLUDE" ]; then
+    echo -e "${RED}[ERROR]${NC} Could not find PyTorch include directory at $TORCH_INCLUDE"
+    echo -e "${YELLOW}[INFO]${NC} You may need to install PyTorch with CUDA support:"
+    echo -e "${YELLOW}[INFO]${NC}   pip install torch --index-url https://download.pytorch.org/whl/cu126"
+    exit 1
+fi
+
 g++ -std=c++17 -O3 -fPIC \
-    -I$(python -c "import torch; print(torch.utils.cpp_extension.include_paths()[0])") \
-    -I$(python -c "import torch; print(torch.utils.cpp_extension.include_paths()[1])") \
+    -I"${TORCH_INCLUDE}" \
+    -I"${TORCH_INCLUDE}/torch/csrc/api/include" \
+    -I/usr/local/cuda/include \
     -c ../flash_dmoe_binding.cpp \
     -o flash_dmoe_binding.o
 
@@ -117,10 +139,16 @@ echo ""
 # Link shared library
 echo -e "${BLUE}[3/3]${NC} Linking shared library..."
 
+# Find PyTorch libraries
+TORCH_LIB="${TORCH_PATH}/lib"
+if [ ! -d "$TORCH_LIB" ]; then
+    TORCH_LIB="${TORCH_PATH}/../lib"
+fi
+
 g++ -shared -fPIC \
     flash_dmoe_kernel.o \
     flash_dmoe_binding.o \
-    -L$(python -c "import torch; print(torch.utils.cpp_extension.library_paths()[0])") \
+    -L"${TORCH_LIB}" \
     -ltorch -ltorch_python \
     -L/usr/local/cuda/lib64 -lcudart \
     -o flash_dmoe_cuda.so
