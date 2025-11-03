@@ -475,7 +475,11 @@ echo "✅ System dependencies installed"
 echo "✅ Python environment configured"
 echo "✅ PyTorch + CUDA installed"
 echo "✅ vLLM + optimization libraries installed"
-echo "✅ Model downloaded: $MODEL_NAME"
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
+    echo "✅ Model downloaded: $MODEL_NAME"
+else
+    echo "✅ Model configured: $MODEL_NAME (will auto-download)"
+fi
 echo "✅ All verifications passed"
 echo ""
 echo "================================================================================"
@@ -489,38 +493,32 @@ else
     echo "   ${GREEN}source ~/moe_venv/bin/activate${NC}"
 fi
 echo ""
-echo "2. Set your model path for easy reference:"
-echo "   ${GREEN}export MODEL_PATH='$MODEL_DIR'${NC}"
+echo "2. Run with your optimizer:"
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
+    echo "   ${GREEN}python run_optimizer.py --model $MODEL_DIR --gpus $GPU_COUNT --profile balanced${NC}"
+else
+    echo "   ${GREEN}python run_optimizer.py --model $MODEL_NAME --gpus $GPU_COUNT --profile balanced${NC}"
+fi
 echo ""
-echo "3. Run baseline test (Week 0):"
-echo "   ${GREEN}python -m vllm.entrypoints.openai.api_server \\${NC}"
-echo "   ${GREEN}    --model \$MODEL_PATH \\${NC}"
-echo "   ${GREEN}    --tensor-parallel-size $GPU_COUNT \\${NC}"
-echo "   ${GREEN}    --dtype float16 \\${NC}"
-echo "   ${GREEN}    --port 8000${NC}"
+echo "3. Or test with vLLM directly:"
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
+    echo "   ${GREEN}python -m vllm.entrypoints.openai.api_server \\${NC}"
+    echo "   ${GREEN}    --model $MODEL_DIR \\${NC}"
+    echo "   ${GREEN}    --tensor-parallel-size $GPU_COUNT \\${NC}"
+    echo "   ${GREEN}    --dtype float16 \\${NC}"
+    echo "   ${GREEN}    --port 8000${NC}"
+else
+    echo "   ${GREEN}python -m vllm.entrypoints.openai.api_server \\${NC}"
+    echo "   ${GREEN}    --model $MODEL_NAME \\${NC}"
+    echo "   ${GREEN}    --tensor-parallel-size $GPU_COUNT \\${NC}"
+    echo "   ${GREEN}    --dtype float16 \\${NC}"
+    echo "   ${GREEN}    --port 8000${NC}"
+fi
 echo ""
 echo "4. In another terminal, run benchmark:"
 echo "   ${GREEN}python scripts/benchmark.py --url http://localhost:8000 --test-all-batches${NC}"
 echo ""
 echo "5. Follow BENCHMARK_PROTOCOL.md for week-by-week testing"
-echo ""
-echo "================================================================================"
-echo "QUICK TEST:"
-echo "================================================================================"
-echo ""
-echo "Test if vLLM can load the model:"
-echo ""
-echo "${GREEN}python -m vllm.entrypoints.openai.api_server \\${NC}"
-echo "${GREEN}  --model $MODEL_DIR \\${NC}"
-echo "${GREEN}  --tensor-parallel-size $GPU_COUNT \\${NC}"
-echo "${GREEN}  --max-model-len 2048 \\${NC}"
-echo "${GREEN}  --port 8000${NC}"
-echo ""
-echo "Then in another terminal:"
-echo ""
-echo "${GREEN}curl http://localhost:8000/v1/completions \\${NC}"
-echo "${GREEN}  -H 'Content-Type: application/json' \\${NC}"
-echo "${GREEN}  -d '{\"model\": \"$MODEL_DIR\", \"prompt\": \"Hello\", \"max_tokens\": 10}'${NC}"
 echo ""
 echo "================================================================================"
 echo "ESTIMATED PERFORMANCE:"
@@ -546,7 +544,9 @@ echo "🚀 Ready to benchmark! Follow BENCHMARK_PROTOCOL.md for next steps."
 echo ""
 
 # Save environment variables to a file for easy reloading
-cat > ~/.moe_env << EOF
+if [ -d "$MODEL_DIR" ] && [ -f "$MODEL_DIR/config.json" ]; then
+    # Model downloaded locally
+    cat > ~/.moe_env << EOF
 # MoE Optimization Environment
 # Source this file: source ~/.moe_env
 
@@ -566,9 +566,33 @@ fi
 
 echo "🚀 MoE environment loaded!"
 echo "   Model: \$MODEL_NAME"
-echo "   Path: \$MODEL_PATH"
+echo "   Local path: \$MODEL_PATH"
 echo "   GPUs: \$GPU_COUNT"
 EOF
+else
+    # Model will auto-download
+    cat > ~/.moe_env << EOF
+# MoE Optimization Environment
+# Source this file: source ~/.moe_env
+
+export MODEL_NAME='$MODEL_NAME'
+export GPU_COUNT=$GPU_COUNT
+
+# Activate environment
+if command -v conda &> /dev/null; then
+    # Conda environment (Lightning Studio)
+    eval "\$(conda shell.bash hook)"
+    conda activate base 2>/dev/null || true
+else
+    # venv environment
+    source ~/moe_venv/bin/activate
+fi
+
+echo "🚀 MoE environment loaded!"
+echo "   Model: \$MODEL_NAME (will auto-download from HuggingFace)"
+echo "   GPUs: \$GPU_COUNT"
+EOF
+fi
 
 print_success "Environment saved to ~/.moe_env"
 print_info "In future sessions, just run: ${GREEN}source ~/.moe_env${NC}"
