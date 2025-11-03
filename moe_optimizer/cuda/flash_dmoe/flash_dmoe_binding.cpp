@@ -5,6 +5,7 @@
  */
 
 #include <torch/extension.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <cuda_runtime.h>
 #include <vector>
 
@@ -104,8 +105,8 @@ torch::Tensor flash_dmoe_forward(
     const int num_blocks = 108;  // H100 has 108 SMs
     const int threads_per_block = 1024;  // 32 warps per block
     
-    // Get CUDA stream (correct API for PyTorch 2.x)
-    cudaStream_t stream = c10::cuda::getCurrentCUDAStream(input_tokens.device().index()).stream();
+    // Get CUDA stream (PyTorch 2.x API)
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream(input_tokens.device().index()).stream();
     
     // Launch kernel
     flash_dmoe_persistent_kernel_wrapper(
