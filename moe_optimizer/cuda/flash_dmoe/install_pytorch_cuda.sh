@@ -10,6 +10,34 @@ echo "PyTorch CUDA Installation Script"
 echo "=========================================="
 echo ""
 
+# Check for Python development headers
+echo "[INFO] Checking for Python development headers..."
+PYTHON_INCLUDE=$(python -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || echo "")
+if [ -z "$PYTHON_INCLUDE" ] || [ ! -f "$PYTHON_INCLUDE/Python.h" ]; then
+    echo "[WARNING] Python development headers not found!"
+    echo "[INFO] Attempting to install python-dev..."
+    
+    # Try conda first (since you're using miniconda)
+    if command -v conda &> /dev/null; then
+        echo "[INFO] Installing via conda..."
+        conda install -y python-dev || true
+    fi
+    
+    # Verify installation
+    PYTHON_INCLUDE=$(python -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || echo "")
+    if [ -z "$PYTHON_INCLUDE" ] || [ ! -f "$PYTHON_INCLUDE/Python.h" ]; then
+        echo "[WARNING] Could not install python-dev via conda"
+        echo "[INFO] Please install manually:"
+        echo "  conda install -c conda-forge python-dev"
+        echo "  OR: sudo apt-get install python3-dev"
+    else
+        echo "[SUCCESS] Python development headers installed!"
+    fi
+else
+    echo "[SUCCESS] Python development headers found at: $PYTHON_INCLUDE"
+fi
+echo ""
+
 # Check current PyTorch installation
 echo "[INFO] Checking current PyTorch installation..."
 TORCH_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "not installed")

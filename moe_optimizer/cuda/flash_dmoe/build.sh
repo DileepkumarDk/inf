@@ -107,6 +107,17 @@ if [ -z "$TORCH_PATH" ]; then
     exit 1
 fi
 
+# Get Python include path
+PYTHON_INCLUDE=$(python -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null)
+if [ -z "$PYTHON_INCLUDE" ] || [ ! -d "$PYTHON_INCLUDE" ]; then
+    echo -e "${RED}[ERROR]${NC} Python development headers not found!"
+    echo -e "${YELLOW}[INFO]${NC} Install Python development package:"
+    echo -e "${YELLOW}[INFO]${NC}   Ubuntu/Debian: sudo apt-get install python3-dev"
+    echo -e "${YELLOW}[INFO]${NC}   CentOS/RHEL: sudo yum install python3-devel"
+    echo -e "${YELLOW}[INFO]${NC}   Or use conda: conda install -c conda-forge python-dev"
+    exit 1
+fi
+
 # Try to find torch include directory
 TORCH_INCLUDE="${TORCH_PATH}/include"
 if [ ! -d "$TORCH_INCLUDE" ]; then
@@ -122,6 +133,7 @@ if [ ! -d "$TORCH_INCLUDE" ]; then
 fi
 
 g++ -std=c++17 -O3 -fPIC \
+    -I"${PYTHON_INCLUDE}" \
     -I"${TORCH_INCLUDE}" \
     -I"${TORCH_INCLUDE}/torch/csrc/api/include" \
     -I/usr/local/cuda/include \
