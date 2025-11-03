@@ -97,80 +97,13 @@ fi
 echo -e "${GREEN}[SUCCESS]${NC} Kernel compiled"
 echo ""
 
-# Create Python binding
-echo -e "${BLUE}[2/3]${NC} Creating Python binding..."
-
-cat > flash_dmoe_binding.cpp << 'EOF'
-#include <torch/extension.h>
-#include <cuda_runtime.h>
-
-// Forward declaration of CUDA kernel interface
-extern "C" void flash_dmoe_forward_cuda(
-    const void* input,
-    const void* gate_weights,
-    const void* expert_weights,
-    void* output,
-    int batch_size,
-    int hidden_dim,
-    int num_experts,
-    int experts_per_token,
-    bool use_fp8,
-    cudaStream_t stream
-);
-
-// Python interface
-torch::Tensor flash_dmoe_forward(
-    torch::Tensor input,
-    torch::Tensor gate_weights,
-    torch::Tensor expert_weights,
-    int num_experts,
-    int experts_per_token,
-    bool use_fp8
-) {
-    TORCH_CHECK(input.is_cuda(), "Input must be on CUDA");
-    TORCH_CHECK(gate_weights.is_cuda(), "Gate weights must be on CUDA");
-    TORCH_CHECK(expert_weights.is_cuda(), "Expert weights must be on CUDA");
-    
-    auto output = torch::zeros_like(input);
-    
-    const int batch_size = input.size(0);
-    const int hidden_dim = input.size(1);
-    
-    // Get CUDA stream
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    
-    flash_dmoe_forward_cuda(
-        input.data_ptr(),
-        gate_weights.data_ptr(),
-        expert_weights.data_ptr(),
-        output.data_ptr(),
-        batch_size,
-        hidden_dim,
-        num_experts,
-        experts_per_token,
-        use_fp8,
-        stream
-    );
-    
-    return output;
-}
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("forward", &flash_dmoe_forward, "FlashDMoE forward pass",
-          py::arg("input"),
-          py::arg("gate_weights"),
-          py::arg("expert_weights"),
-          py::arg("num_experts"),
-          py::arg("experts_per_token"),
-          py::arg("use_fp8") = true);
-}
-EOF
-
 # Compile Python binding
+echo -e "${BLUE}[2/3]${NC} Compiling Python binding..."
+
 g++ -std=c++17 -O3 -fPIC \
     -I$(python -c "import torch; print(torch.utils.cpp_extension.include_paths()[0])") \
     -I$(python -c "import torch; print(torch.utils.cpp_extension.include_paths()[1])") \
-    -c flash_dmoe_binding.cpp \
+    -c ../flash_dmoe_binding.cpp \
     -o flash_dmoe_binding.o
 
 if [ $? -ne 0 ]; then
@@ -178,7 +111,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo -e "${GREEN}[SUCCESS]${NC} Python binding created"
+echo -e "${GREEN}[SUCCESS]${NC} Python binding compiled"
 echo ""
 
 # Link shared library
