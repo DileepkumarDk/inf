@@ -6,11 +6,14 @@ CRITICAL: The 22-27× speedup vs vLLM baseline requires high batch sizes!
 This script tests at multiple concurrency levels to show the true scaling.
 
 Usage:
-    # Test single request (low latency)
-    python benchmark.py --url http://localhost:8000 --batch 1
+    # Test single batch size
+    python benchmark.py --url http://localhost:8000 --batch-sizes 1 --num-requests 50
     
     # Test high throughput (high batch)
-    python benchmark.py --url http://localhost:8000 --batch 512
+    python benchmark.py --url http://localhost:8000 --batch-sizes 512 --num-requests 512
+    
+    # Test multiple batch sizes
+    python benchmark.py --url http://localhost:8000 --batch-sizes 1,64,256,512 --num-requests 100
     
     # Test all batch sizes (recommended)
     python benchmark.py --url http://localhost:8000 --test-all-batches
@@ -271,10 +274,20 @@ async def main():
         help="Batch size (concurrent requests). If not set, tests multiple batches."
     )
     parser.add_argument(
+        "--batch-sizes",
+        type=str,
+        help="Comma-separated batch sizes to test (e.g., '1,64,256,512')"
+    )
+    parser.add_argument(
         "--requests",
         type=int,
         default=100,
         help="Total number of requests (default: 100)"
+    )
+    parser.add_argument(
+        "--num-requests",
+        type=int,
+        help="Total number of requests (alias for --requests)"
     )
     parser.add_argument(
         "--max-tokens",
@@ -291,6 +304,10 @@ async def main():
         "--save",
         help="Save results to JSON file"
     )
+    parser.add_argument(
+        "--output",
+        help="Save results to JSON file (alias for --save)"
+    )
     
     args = parser.parse_args()
     
@@ -298,8 +315,15 @@ async def main():
         print("Install aiohttp first: pip install aiohttp")
         return 1
     
+    # Handle argument aliases
+    num_requests = args.num_requests if args.num_requests else args.requests
+    output_file = args.output if args.output else args.save
+    
     # Determine batch sizes to test
-    if args.test_all_batches:
+    if args.batch_sizes:
+        # Parse comma-separated batch sizes
+        batch_sizes = [int(x.strip()) for x in args.batch_sizes.split(',')]
+    elif args.test_all_batches:
         batch_sizes = [1, 4, 16, 64, 256, 512]
     elif args.batch:
         batch_sizes = [args.batch]
@@ -312,7 +336,7 @@ async def main():
     print("="*90)
     print(f"   URL:          {args.url}")
     print(f"   Batch sizes:  {batch_sizes}")
-    print(f"   Requests:     {args.requests} per batch size")
+    print(f"   Requests:     {num_requests} per batch size")
     print(f"   Tokens/req:   {args.max_tokens}")
     print()
     print("⚠️  IMPORTANT: Make sure your API server is running!")
@@ -340,7 +364,7 @@ async def main():
         result = await run_benchmark_batch(
             args.url,
             batch_size,
-            args.requests,
+            num_requests,
             args.max_tokens
         )
         results.append(result)
@@ -353,11 +377,11 @@ async def main():
         print_comparison_table(results)
     
     # Save results
-    if args.save:
+    if output_file:
         results_dict = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "url": args.url,
-            "requests_per_batch": args.requests,
+            "requests_per_batch": num_requests,
             "max_tokens": args.max_tokens,
             "results": [
                 {
@@ -371,9 +395,9 @@ async def main():
             ]
         }
         
-        with open(args.save, "w") as f:
+        with open(output_file, "w") as f:
             json.dump(results_dict, f, indent=2)
-        print(f"\n✓ Results saved to {args.save}")
+        print(f"\n✓ Results saved to {output_file}")
     
     return 0
 
