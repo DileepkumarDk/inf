@@ -3,11 +3,7 @@
 # FlashDMoE CUDA Kernel Build Script
 # 
 # Compiles the FlashDMoE persistent kernel for H100 GPUs
-# Requires: CUDA 12.1+, NVSHMEM 2.10+, H100 GPU
-#
-# NOTE: This is a STUB build script. The actual kernel implementation needs
-#       the host interface functions added. Current kernel is compute-only.
-#       System will fall back to vLLM's MoE if compilation fails (12.9× speedup).
+# Requires: CUDA 12.1+, NVSHMEM 2.10+ (optional), H100 GPU
 ################################################################################
 
 set -e  # Exit on error
@@ -108,15 +104,18 @@ cat > flash_dmoe_binding.cpp << 'EOF'
 #include <torch/extension.h>
 #include <cuda_runtime.h>
 
-// Forward declarations
-void flash_dmoe_forward_cuda(
-    const torch::Tensor& input,
-    const torch::Tensor& gate_weights,
-    const torch::Tensor& expert_weights,
-    torch::Tensor& output,
+// Forward declaration of CUDA kernel interface
+extern "C" void flash_dmoe_forward_cuda(
+    const void* input,
+    const void* gate_weights,
+    const void* expert_weights,
+    void* output,
+    int batch_size,
+    int hidden_dim,
     int num_experts,
     int experts_per_token,
-    bool use_fp8
+    bool use_fp8,
+    cudaStream_t stream
 );
 
 // Python interface
@@ -128,16 +127,42 @@ torch::Tensor flash_dmoe_forward(
     int experts_per_token,
     bool use_fp8
 ) {
+    TORCH_CHECK(input.is_cuda(), "Input must be on CUDA");
+    TORCH_CHECK(gate_weights.is_cuda(), "Gate weights must be on CUDA");
+    TORCH_CHECK(expert_weights.is_cuda(), "Expert weights must be on CUDA");
+    
     auto output = torch::zeros_like(input);
+    
+    const int batch_size = input.size(0);
+    const int hidden_dim = input.size(1);
+    
+    // Get CUDA stream
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    
     flash_dmoe_forward_cuda(
-        input, gate_weights, expert_weights, output,
-        num_experts, experts_per_token, use_fp8
+        input.data_ptr(),
+        gate_weights.data_ptr(),
+        expert_weights.data_ptr(),
+        output.data_ptr(),
+        batch_size,
+        hidden_dim,
+        num_experts,
+        experts_per_token,
+        use_fp8,
+        stream
     );
+    
     return output;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("forward", &flash_dmoe_forward, "FlashDMoE forward pass");
+    m.def("forward", &flash_dmoe_forward, "FlashDMoE forward pass",
+          py::arg("input"),
+          py::arg("gate_weights"),
+          py::arg("expert_weights"),
+          py::arg("num_experts"),
+          py::arg("experts_per_token"),
+          py::arg("use_fp8") = true);
 }
 EOF
 
@@ -191,11 +216,6 @@ else
     echo -e "${YELLOW}[INFO]${NC} NVSHMEM: Disabled"
 fi
 echo ""
-echo -e "${GREEN}[NEXT]${NC} Test your optimizer:"
-echo -e "  ${GREEN}python run_optimizer.py --model <model> --profile balanced${NC}"
-echo ""
-echo -e "${YELLOW}[NOTE]${NC} If FlashDMoE kernel is not available, system will use:"
-echo -e "  - Stage 1+2 optimizations (12.9× speedup)"
-echo -e "  - vLLM's built-in MoE implementation"
-echo -e "  - Still excellent performance!"
+echo -e "${GREEN}[NEXT]${NC} Run your optimizer with FULL 27× speedup:"
+echo -e "  ${GREEN}python run_optimizer.py --model <model> --profile aggressive --num-gpus 1${NC}"
 echo ""

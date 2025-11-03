@@ -711,4 +711,50 @@ void flash_dmoe_shutdown_kernel_wrapper() {
     flash_dmoe_shutdown_kernel<<<1, 1>>>();
 }
 
+/*
+ * PyTorch interface function
+ * This is what the Python binding calls
+ */
+void flash_dmoe_forward_cuda(
+    const void* input,
+    const void* gate_weights,
+    const void* expert_weights,
+    void* output,
+    int batch_size,
+    int hidden_dim,
+    int num_experts,
+    int experts_per_token,
+    bool use_fp8,
+    cudaStream_t stream
+) {
+    // Setup configuration
+    MoEConfig config;
+    config.num_experts = num_experts;
+    config.expert_dim = 4096;  // Standard for 30B models
+    config.hidden_dim = hidden_dim;
+    config.top_k = experts_per_token;
+    config.num_gpus = 1;  // Single GPU for now
+    config.expert_per_gpu = num_experts;
+    config.use_fp8 = use_fp8;
+    config.use_sparse_24 = false;
+    
+    // Calculate grid/block dimensions
+    const int num_blocks = (batch_size + MAX_TOKENS_PER_BLOCK - 1) / MAX_TOKENS_PER_BLOCK;
+    const int threads_per_block = NUM_WARPS * WARP_SIZE;
+    
+    // Launch persistent kernel
+    flash_dmoe_persistent_kernel_wrapper(
+        input,
+        gate_weights,
+        expert_weights,
+        output,
+        config,
+        batch_size,
+        0,  // my_gpu_id
+        num_blocks,
+        threads_per_block,
+        stream
+    );
+}
+
 }
