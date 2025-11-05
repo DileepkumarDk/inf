@@ -382,6 +382,22 @@ def get_aggressive_config(model_path: str, num_gpus: int = 3, model_type: Option
             # Fallback: Assume MoE if "moe", "qwen3", or architecture keywords in name
             model_type = "moe" if any(x in model_path.lower() for x in ["moe", "mixtral", "qwen3-", "qwen2.5-moe", "expert", "-a3b", "-a14b"]) else "dense"
     
+    # Auto-detect MoE-specific params if it's a MoE model
+    num_experts_detected = None
+    experts_per_token_detected = None
+    
+    if model_type == "moe":
+        try:
+            from .model_inspector import ModelInspector
+            inspector = ModelInspector()
+            info = inspector.inspect_model(model_path)
+            num_experts_detected = info.get("num_experts", None)
+            experts_per_token_detected = info.get("experts_per_token", None)
+        except Exception as e:
+            # Auto-detection failed, disable features that require num_experts
+            import logging
+            logging.warning(f"Could not auto-detect MoE parameters: {e}")
+    
     config = OptimizationConfig(
         model_path=model_path,
         model_type=model_type,
@@ -391,22 +407,12 @@ def get_aggressive_config(model_path: str, num_gpus: int = 3, model_type: Option
         enable_dual_batch_overlap=True,
         enable_disaggregation=True,
         enable_kv_tiering=True,
-        enable_expert_placement=(model_type == "moe"),  # Only for MoE
-        enable_expert_sparsity=(model_type == "moe"),  # Only for MoE
+        enable_expert_placement=(model_type == "moe" and num_experts_detected is not None),
+        enable_expert_sparsity=(model_type == "moe" and num_experts_detected is not None),
         gpu_memory_utilization=0.95,  # Push limits
         max_num_batched_tokens=12288,  # Larger batches
+        num_experts=num_experts_detected,
+        experts_per_token=experts_per_token_detected or 2,  # Default to 2 if not detected
     )
-    
-    # Set MoE-specific params only if it's actually a MoE model
-    if model_type == "moe":
-        # Auto-detect num_experts from model config instead of hardcoding
-        try:
-            from .model_inspector import ModelInspector
-            inspector = ModelInspector()
-            info = inspector.inspect_model(model_path)
-            config.num_experts = info.get("num_experts", None)  # Will be auto-detected
-        except Exception:
-            # Fallback: Leave as None, will be detected at runtime
-            config.num_experts = None
     
     return config
