@@ -405,7 +405,7 @@ def get_aggressive_config(model_path: str, num_gpus: int = 3, model_type: Option
         enable_fp8=True,
         fp8_router_precision="fp8",  # Router in FP8 too
         enable_dual_batch_overlap=True,
-        enable_disaggregation=True,
+        enable_disaggregation=(num_gpus >= 2),  # FIX: Only enable if we have 2+ GPUs
         enable_kv_tiering=True,
         enable_expert_placement=(model_type == "moe" and num_experts_detected is not None),
         enable_expert_sparsity=(model_type == "moe" and num_experts_detected is not None),
