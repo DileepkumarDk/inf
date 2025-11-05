@@ -21,11 +21,13 @@ from pathlib import Path
 # Add package to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from moe_optimizer.core.config import OptimizationConfig
+from moe_optimizer.core.config import (
+    OptimizationConfig,
+    get_conservative_config,
+    get_aggressive_config,
+    auto_configure_for_model
+)
 from moe_optimizer.core.engine import OptimizedMoEEngine
-
-# Import config helpers
-from configs import get_conservative_config, get_aggressive_config, auto_configure_for_model
 
 
 def setup_logging(verbose: bool = False):
