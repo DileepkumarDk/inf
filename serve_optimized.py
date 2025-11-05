@@ -24,9 +24,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from moe_optimizer.core.config import (
     OptimizationConfig,
     get_conservative_config,
-    get_aggressive_config,
-    auto_configure_for_model
+    get_aggressive_config
 )
+from moe_optimizer.core.model_inspector import auto_configure_for_model
 from moe_optimizer.core.engine import OptimizedMoEEngine
 
 
