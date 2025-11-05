@@ -303,13 +303,88 @@ def main():
     
     print()
     
-    # Initialize optimizations
-    logger.info("Loading model and applying optimizations...")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CRITICAL FIX: Initialize engine to load FlashDMoE and apply optimizations
+    # ═══════════════════════════════════════════════════════════════════════════
+    logger.info("=" * 80)
+    logger.info("LOADING MODEL AND APPLYING OPTIMIZATIONS")
+    logger.info("=" * 80)
     logger.info(f"Model: {args.model}")
+    logger.info("")
+    
+    try:
+        # This is THE critical call that loads FlashDMoE kernel and patches model
+        engine.initialize()
+        logger.info("")
+        logger.info("✓✓✓ OPTIMIZATIONS APPLIED SUCCESSFULLY ✓✓✓")
+        logger.info("")
+    except Exception as e:
+        logger.error(f"Failed to initialize engine with optimizations: {e}")
+        logger.error("Falling back to vanilla vLLM (no optimizations)")
+        logger.info("")
+    
+    # Check if we have an optimized engine
+    if hasattr(engine, 'engine') and engine.engine is not None:
+        # We successfully initialized with optimizations
+        logger.info("✓ Optimized vLLM engine loaded successfully!")
+        logger.info(f"Expected speedup: {config.calculate_expected_speedup():.0f}×")
+        logger.info("")
+        
+        # Now we need to start the OpenAI API server with this engine
+        # vLLM 0.11+ uses: python -m vllm.entrypoints.openai.api_server
+        # But we need to use the already-initialized engine
+        
+        logger.info("Starting OpenAI-compatible API server...")
+        logger.info(f"  Endpoint: http://localhost:{args.port}/v1")
+        logger.info(f"  Model name: {args.model}")
+        logger.info("")
+        logger.info("Note: Using pre-optimized engine (FlashDMoE already applied)")
+        logger.info("Press Ctrl+C to stop the server")
+        logger.info("=" * 80)
+        
+        # Import vLLM's API server components
+        try:
+            from vllm.entrypoints.openai.api_server import run_server
+            import uvicorn
+            import asyncio
+            
+            # Start the API server with our optimized engine
+            # This approach uses vLLM's internal API
+            asyncio.run(run_server(
+                llm=engine.engine,
+                host="0.0.0.0",
+                port=args.port
+            ))
+            
+        except ImportError as ie:
+            # Fallback: If vLLM API not compatible, keep engine alive and serve via generate()
+            logger.warning(f"Could not import vLLM API server: {ie}")
+            logger.info("Engine is running. You can use engine.generate() directly.")
+            logger.info("Press Ctrl+C to stop")
+            
+            try:
+                import time
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("\nShutting down...")
+                
+        except KeyboardInterrupt:
+            logger.info("\nShutting down server...")
+            logger.info("Server stopped")
+        except Exception as e:
+            logger.error(f"Server error: {e}")
+            logger.info("Engine is still loaded. You can use it directly via Python.")
+            return 1
+        
+        return 0
+    
+    # Fallback: engine initialization failed, use subprocess approach
+    logger.warning("Engine initialization failed or incomplete")
+    logger.info("Falling back to vanilla vLLM via subprocess...")
+    logger.info("")
     
     # Build vLLM command with optimizations
-    logger.info("Starting vLLM server with optimizations...")
-    
     vllm_args = [
         "python", "-m", "vllm.entrypoints.openai.api_server",
         "--model", args.model,
